@@ -1,15 +1,18 @@
+
+
+
 from qiskit import QuantumRegister,ClassicalRegister,QuantumCircuit,execute,Aer
 from qiskit.providers.aer import QasmSimulator
 from qiskit.quantum_info.operators import Operator
 from math import log,cos,sin,sqrt,pi,exp
 import matplotlib.pyplot as plt
-from numpy import kron,matmul,transpose,conjugate,zeros,trace,complex128,array,inf,linspace,abs
+import numpy as np
+from numpy import kron,matmul,transpose,conjugate,zeros,trace,complex128,array,inf,zeros,linspace,kron,ndarray,conjugate
 from time import time
 from scipy.linalg import expm
 from random import random
 from scipy.fft import fft
 from scipy import integrate
-import xlsxwriter
 from tqdm import tqdm
 H=[[1/sqrt(2),1/sqrt(2)],[1/sqrt(2),-1/sqrt(2)]]
 X=[[0,1],[1,0]]
@@ -20,10 +23,10 @@ Y=[[0,-1j],[1j,0]]
 Z=[[1,0],[0,-1]]
 CX=[[1,0,0,0],[0,1,0,0],[0,0,0,1],[0,0,1,0]]
 ket=[[[1],[0]],[[0],[1]],ID]
-CH=[[1,0,0,0],[0,1/sqrt(2),0,1/sqrt(2)],[0,0,1,0],[0,1/sqrt(2),0,-1/sqrt(2)]]
 
 def RX(t):
     return [[cos(t),-1j*sin(t)],[-1j*sin(t),cos(t)]]
+
 def twoQubitState(t):# Parametrized two qubit state
     # twoQubitState(t)|00>=cost|00>-isint|11>
     #CH=kron(DM0,ID)+kron(DM1,H)
@@ -51,6 +54,7 @@ def spaceExpansion(mat,n,idx):# function for nQubitWState
             mat=kron(mat,ID)
     return mat
 def nQubitWState(n):
+    # return the unitary U, U|0>^n prepares an n-qubit W state.
     m=M(1,n-1)
     m=spaceExpansion(m,n,[0])
     for i in range(1,n-1):
@@ -63,6 +67,7 @@ def nQubitWState(n):
     m=matmul(spaceExpansion(X,n,[0]),m)
     return m
 def nQubitGHZState(n):# of course n must be at least 2, otherwise what do you want?
+    # return the unitary U, U|0>^n prepares an n-qubit GHZ state.
     U=matmul(CX,kron(H,ID))
     newCX=kron(ID,CX)
     while n>2:
@@ -84,7 +89,7 @@ def D2B(n,N):
             opt.append(1)
             n-=2**(l-i-1)
     return opt
-def B2D(li):
+def B2D(li):# binary to decimal
     l=len(li)
     res=0
     for i in range(l):res+=li[i]*2**(l-i-1)
@@ -105,6 +110,8 @@ def listStringSum(li):
     for i in range(1,len(li)):text+=li[i]
     return text
 def PauliDecomposition(Ham):
+    # Decompose an hermitian matrix into linear combination of multiple-qubit Pauli matrices.
+    # The observable under concern is defined in eq. (8).
     n=int(log(len(Ham),2))
     set=[ID,X,Y,Z]
     dic={0:'I',1:'X',2:'Y',3:'Z'}
@@ -120,7 +127,10 @@ def PauliDecomposition(Ham):
             nQubitPauli.append([dic[idx[i]] for i in range(n)])
             remaindOps.append(ops)
     print(f'number of nonzero term(s): {len(coes)}')
-    for i in range(len(coes)):print(f'operator: {listStringSum(nQubitPauli[i])}, coefficient: {coes[i]}')
+    for i in range(len(coes)):
+        if abs(coes[i])>1e-7:print(f'operator: {listStringSum(nQubitPauli[i])}, coefficient: {coes[i]}')
+
+
 
 def quad(li):# hamiltonian companian function to avoid shallow copy
     res=[]# there are specific deep copy, from copy import deepcopy
@@ -128,6 +138,9 @@ def quad(li):# hamiltonian companian function to avoid shallow copy
         for _ in range(4):res.append([li[j][0],li[j][1]])
     return res
 def hamiltonian(num_qubit,idle):
+    # Observable defined in eq. (8), which is the observable B in the following paper:
+    # Chen, Zhi-Hua, et al. "Improved lower bounds on genuine-multipartite-entanglement concurrence." Physical Review A 85.6 (2012): 062320.
+    # At the end of page 2 of PRA 85.6 (2012): 062320.
     # this Hamiltonian calculates Tr(rho^2_gamma) 
     # the variable num_qubit is actually half the number of qubit required
     loc=idle
@@ -146,6 +159,7 @@ def hamiltonian(num_qubit,idle):
     for i in range(len(jk)):Har[B2D(jk[i][0])][B2D(jk[i][1])]=1
     return Har
 
+'''
 def densityMatrix(state):
     dm=[]
     for i in range(len(state)):
@@ -153,6 +167,26 @@ def densityMatrix(state):
         for j in range(len(state)):
             dm[i].append(complex(state[i]*conjugate(state[j])))
     return dm
+'''
+def isinstanceVector(state):
+    # this function check whether the state is a ket/bra or not.
+    if not isinstance(state, list) and not isinstance(state, ndarray):
+        return 1
+    if len(state[0]) == 1:
+        return 1
+    return 0
+def densityMatrix(state):
+    if not isinstanceVector(state):
+        return state
+    if isinstance(state[0], list) or isinstance(state[0], ndarray):
+        state = list(array(state).T[0])
+    dm = []
+    for i in range(len(state)):
+        dm.append([])
+        for j in range(len(state)):
+            dm[i].append(complex(state[i] * conjugate(state[j])))
+    return array(dm)
+
 def partialTrace(state,idle):
     # idle here refers to those traced qubits.
     n=int(log(len(state),2))
@@ -175,10 +209,15 @@ def partialTrace(state,idle):
     return res
 
 def swapTestRes(ipt,rep):
-    trrho2=2*ipt['0']/rep-1 # the try sentence isn't required here, p0>=0.5
+    # trrho2 is the quantity q0 defined in eq. (6)
+    trrho2=2*ipt['0']/rep-1
     return sqrt(2*(1-trrho2))
 
 def swapTest(u0,idle,rep=10**6):
+    # One of the key functions in the program, 
+    # u0 is the unitary required to prepare state |\psi>
+    # idle indicates which pair of qubit should not be controlled-swapped
+    # This functions returns the concurrence under a certain biseparation based on idle.
     n=int(log(len(u0),2))
     u0=Operator(u0)
     ctrl=QuantumRegister(1)
@@ -203,9 +242,12 @@ def WStateConcurrence(N,k):
     # the GME concurrence has a simple formula,
     # it only depends on the number of qubits N
     # and the number of idle qubits k
+    # See eq. (11)
     return sqrt(2*(1-(N**2-2*N*k+2*k**2)/N/N))
 
-def completes(ele,otherPart,N):# to check whether a term should be added to idle
+def completes(ele,otherPart,N):
+    # this function would be called by genPartition(), 
+    # to check whether a term should be added to idle
     for i in range(len(otherPart)):
         if len(ele)+len(otherPart[i])==N:
             temp=ele+otherPart[i]
@@ -219,7 +261,8 @@ def completes(ele,otherPart,N):# to check whether a term should be added to idle
                 if ele[j] in otherPart[i]:count1+=1
             if count1==len(ele):return False
     return True
-def genPartition(N):# for n qubits, 2^(n-1)-1 terms for n>2
+def genPartition(N):
+    # for n qubits, 2^(n-1)-1 terms for n>2
     n=int(N/2)
     li=[[i] for i in range(N)]
     idles=[[i] for i in range(N)]
@@ -235,22 +278,21 @@ def genPartition(N):# for n qubits, 2^(n-1)-1 terms for n>2
     return idles
 
 def expectation(state,ham,time,rep):
+    # required by timeSeries()
     eiht=expm(time*1j*array(ham))
     dm=densityMatrix(kron(state,state))
     return trace(matmul(eiht,dm))*(1+(1-2*random())/sqrt(rep))
-def h(x):
+def h(x):# required by timeSeries()
     if x**2>=1:return 0
     else:return exp(-1/(1-x**2))
-def window(x):
+def window(x):# required by timeSeries()
     if x>=0 and x<1:return 1
     else:return 0
-def fUnint(xp):
+def fUnint(xp):# required by timeSeries()
     return 5*h(2*xp-point)*window(xp)#/4.05
-def F(x,num_sample):
+def F(x,num_sample):# required by timeSeries()
     coes=[]
     xs=[x-2*(num_sample-m)/num_sample for m in range(num_sample)]+[x+2*m/num_sample for m in range(num_sample)]
-    #xs=[-x/2+x*i/num_sample for i in range(len(num_sample))]
-    #print(f'xs:{xs}')
     global point
     for i in range(len(xs)):
         point=xs[i]
@@ -258,6 +300,7 @@ def F(x,num_sample):
     coes=fft(coes)
     return coes
 def timeSeries(theta,num_qubit=3,num_sample=50,rep=10**5):
+    # Somma, Rolando D. "Quantum eigenvalue estimation via time series analysis." New Journal of Physics 21.12 (2019): 123025.
     exp_TS=[]
     coes=F(0.75,num_sample)
     for i in range(len(theta)):
@@ -268,13 +311,47 @@ def timeSeries(theta,num_qubit=3,num_sample=50,rep=10**5):
         for j in range(-num_sample,num_sample):
             exp.append(coes[j]*expectation(state,array(hamiltonian(num_qubit,0)),j,rep))
         exp_TS.append(sum(exp))
-    #norm=exp_TS[0]
     norm=max(exp_TS)
-    for i in range(len(exp_TS)):exp_TS[i]/=norm#sqrt(2*(1-exp_TS[i]/norm))
+    for i in range(len(exp_TS)):exp_TS[i]/=norm
     return exp_TS
 
 def varyingTheta(num_points=100,num_qubit=3,rep=10**4):
-    #theta=[i*pi/(num_points-1) for i in range(num_points-1)]+[pi]
+    # figure 2
+    theta=[i*pi/(num_points-1) for i in range(num_points-1)]+[pi]
+    idle=genPartition(num_qubit)
+    GME_Classical=[]
+    GME_Quantum=[]
+    for i in range(num_points):
+        if num_qubit==3:unitary=WState(theta[i])
+        else:unitary=twoQubitState(theta[i])
+        state=matmul(unitary,[[1]]+[[0] for _ in range(2**num_qubit-1)])
+        iGME=[]
+        qGME=[]
+        for j in range(len(idle)):
+            pdm=partialTrace(state,idle[j])
+            temp=2*(1-trace(matmul(pdm,pdm)))
+            #temp=trace(matmul(pdm,pdm))
+            if abs(temp.imag)>1e-7:print('imaginary part might exist')
+            iGME.append(sqrt(temp.real))
+            swap_test_res=swapTest(unitary,idle[j],rep)
+            qGME.append(swap_test_res)
+        GME_Classical.append(min(iGME))
+        GME_Quantum.append(min(qGME))
+        #GME_Har.append(min(hGME))
+    x=[theta[i]/pi for i in range(num_points)]
+    plt.plot(x,GME_Classical,'r',label='partial trace')
+    plt.plot(x,GME_Quantum,'b-.',label='swap test')
+    #GME_TS=timeSeries(theta,num_qubit,100,rep)
+    #plt.plot(x,GME_TS,'g*',label='time series')
+    plt.xlabel(r'$\theta/\pi$')
+    plt.ylabel('GME Concurrence')
+    plt.legend(loc='best')
+    #plt.savefig('with time series.png')
+    #plt.savefig('with time series.eps',format='eps')
+    plt.show()
+
+def varyingTheta_Time_Series(num_points=100,num_qubit=2,rep=10**4):
+    # figure 3
     theta=linspace(0,pi/2,num_points)
     idle=genPartition(num_qubit)
     GME_Classical=[]
@@ -309,11 +386,9 @@ def varyingTheta(num_points=100,num_qubit=3,rep=10**4):
     plt.ylabel('GME Concurrence')
     #plt.ylabel('purity')
     plt.legend(loc='best')
-    plt.savefig('with time series.png')
-    plt.savefig('with time series.eps',format='eps')
+    #plt.savefig('with time series.png')
+    #plt.savefig('with time series.eps',format='eps')
     plt.show()
-
-varyingTheta(101,2,10**4)
 
 def varyingQubit(rep=10**4):
     start=2
@@ -352,13 +427,12 @@ def varyingQubit(rep=10**4):
     #plt.savefig('n qubit w state.png')
     #plt.savefig('n qubit w state.eps',format='eps')
 
-#varyingQubit(10**4)
 
 def unnecessaryBipartitions(rep=10**4):
     # for W state and GHZ state, they are highly symmetrical, it is reasonable to 
     # assume that a lot of bipartitions give the same result.
     start=2
-    end=13
+    end=8
     y1=[]
     y2=[]
     for num_qubit in range(start,end):
@@ -381,11 +455,10 @@ def unnecessaryBipartitions(rep=10**4):
     plt.plot(x,y2,'bo')
     plt.show()
 
-#unnecessaryBipartitions()
 
-def varyingQubitWithFewerBipartition(rep=10**4):
+def varyingQubitWithFewerBipartition(end=12,rep=10**4):
+    # fig 4
     start=2
-    end=16
     GME_Classical=[]
     GME_Quantum=[]
     idle=[0]
@@ -410,12 +483,11 @@ def varyingQubitWithFewerBipartition(rep=10**4):
     print(f'current approximate result: {GME_Quantum}')
     x=[i for i in range(start,end)]
     plt.plot(x,GME_Classical,'r',label='partial trace')
-    plt.plot(x,GME_Quantum,'b-.',label='swap test')
+    plt.plot(x,GME_Quantum,'bo',label='swap test')
     plt.xlabel('number of qubits')
     plt.ylabel('GME Concurrence')
     plt.legend(loc='best')
-    plt.savefig('n qubit w state with one bipartition.png')
-    plt.savefig('n qubit w state with one bipartition.eps',format='eps')
+    #plt.savefig('n qubit w state with one bipartition.png')
+    #plt.savefig('n qubit w state with one bipartition.eps',format='eps')
     plt.show()
 
-#varyingQubitWithFewerBipartition(10**5)

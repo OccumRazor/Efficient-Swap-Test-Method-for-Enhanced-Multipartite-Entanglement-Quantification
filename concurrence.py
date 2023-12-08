@@ -1,4 +1,12 @@
-
+'''
+Python 3.9.2
+Version of the packages
+qiskit 0.39.5
+numpy 1.25.2
+matplotlib 3.7.2
+scipy 1.6.0
+tqdm 4.65.0
+'''
 
 
 from qiskit import QuantumRegister,ClassicalRegister,QuantumCircuit,execute,Aer
